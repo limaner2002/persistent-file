@@ -1,0 +1,6 @@
+*~
+*.dyn_*
+*.o
+*.hi
+.cabal-sandbox
+persistent-file
