@@ -4,14 +4,14 @@
 {-# LANGUAGE TemplateHaskell            #-}
 {-# LANGUAGE TypeFamilies               #-}
 {-# LANGUAGE MultiParamTypeClasses      #-}
+{-# LANGUAGE OverloadedStrings          #-}
 
-import Prelude hiding (readFile)
-import XMLParser
+import Data.Text (Text, unpack, concat, pack, length)
+import Prelude hiding (readFile, concat, length)
 import Database.Persist.TH
 import System.Environment (getArgs)
-import Data.Text (Text,unpack)
-import Text.XML
 import Database.Persist
+import XMLParser
 
 mkPersist sqlSettings [persistLowerCase|
 Dept
@@ -23,27 +23,34 @@ Emp
   empno Int
   ename String
   job String
-  mgr Int
+  mgr Int Maybe
   hireDate String
   sal Double
+  comm Double Maybe
   deptNo Int
   deriving Show
 |]
 
-createRecords :: PersistEntity a => [Text -> PersistValue] -> [[Text]] -> [Either Text a]
-createRecords xs ys = map (createRecord xs) ys
+deptFields = [ ("DEPTNO", PersistInt64 . read . unpack)
+             , ("DNAME", PersistText)
+             , ("LOC", PersistText)
+             ]
+
+empFields = [ ("EMPNO", PersistInt64 . read . unpack)
+             , ("ENAME", PersistText)
+             , ("JOB", PersistText)
+             , ("MGR", verifyField (PersistInt64 . read . unpack))
+             , ("HIREDATE", PersistText)
+             , ("SAL", PersistDouble . read . unpack)
+             , ("COMM", verifyField (PersistDouble . read . unpack) )
+             , ("DEPTNO", PersistInt64 . read . unpack)
+             ]
 
 main = do
   (path:args) <- getArgs
-  Document prologue root epilogue <- readFile def path
-  let recordTexts = map (parseXML 2) $ elementNodes root
-      fieldFuncs = [ PersistInt64 . read . unpack
-                   , PersistText
-                   , PersistText
-                   , PersistInt64 . read . unpack
-                   , PersistText
-                   , PersistDouble . read . unpack
-                   , PersistInt64 . read . unpack
-                   ]
-  -- mapM_ (printRecord) (createRecords [PersistInt64 . read . unpack, PersistText, PersistText] recordTexts :: [Either Text Dept])
-  mapM_ (printRecord) (createRecords fieldFuncs recordTexts :: [Either Text Emp])
+  records <- parseFile path "EMP" empFields :: IO [Either Text Emp]
+  -- let cursor = fromDocument doc
+  -- let cursors =
+  --       cursor $/ element "EMP"
+  -- let records = map (\x -> parseRecord x empFields :: Either Text Emp) cursors
+  mapM_ printRecord records

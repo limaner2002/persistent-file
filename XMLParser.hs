@@ -4,27 +4,40 @@
 {-# LANGUAGE TemplateHaskell            #-}
 {-# LANGUAGE TypeFamilies               #-}
 {-# LANGUAGE MultiParamTypeClasses      #-}
+{-# LANGUAGE OverloadedStrings          #-}
+
 module XMLParser where
 
-import Data.Text (Text,unpack)
+import Data.Text (Text, unpack, concat, pack, length)
+import Prelude hiding (readFile, concat, length)
+
 import Text.XML
-import Prelude hiding (readFile)
+import Text.XML.Cursor
 import Database.Persist
 
 printRecord :: (PersistEntity a, Show a) => Either Text a -> IO ()
 printRecord (Left msg) = print $ unpack msg
 printRecord (Right record) = print record
 
-getContent :: Node -> Text
-getContent (NodeContent t) = t
+verifyField :: (Text -> PersistValue) -> Text -> PersistValue
+verifyField f txt
+    | length txt > 0 = f txt
+    | otherwise = PersistNull
 
-getChildren :: Node -> [Node]
-getChildren (NodeElement e) = elementNodes e
+parseRecord :: PersistEntity a => Cursor -> [(Name, Text -> PersistValue)] -> Either Text a
+parseRecord cursor fields = do
+  let fieldTexts = concatMap (\field -> checkField $ fieldText field) fields
+          where
+            fieldText field = cursor $/ element (fst field) &/ content
+            checkField [] = [""]
+            checkField fld = fld
+  let fieldFuncs = map snd fields
+  let fieldValues = zipWith id fieldFuncs fieldTexts -- $ trace (show fieldTexts) (fieldTexts)
+  fromPersistValues fieldValues
 
-createRecord :: PersistEntity a => [Text -> PersistValue] -> [Text] -> Either Text a
-createRecord xs ys = fromPersistValues $ zipWith id xs ys
-
-parseXML :: Int -> Node -> [Text]
-parseXML 0 _ = []
-parseXML 1 node = map getContent $ getChildren node
-parseXML n node = concatMap (parseXML (n-1)) $ getChildren node
+parseFile :: PersistEntity a => FilePath -> Name -> [(Name, Text -> PersistValue)] -> IO [Either Text a]
+parseFile path elementName fields = do
+  doc <- readFile def path
+  let cursor = fromDocument doc
+  let cursors = cursor $/ element elementName
+  return $ map (\x -> parseRecord x fields) cursors
