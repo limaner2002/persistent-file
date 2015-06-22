@@ -11,11 +11,12 @@ import Prelude hiding (readFile, concat, length)
 import Database.Persist.TH
 import System.Environment (getArgs)
 import Database.Persist
-import XMLParser
 import Database.Persist.MySQL
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.Trans.Resource (runResourceT)
 import Control.Monad.Logger (runNoLoggingT)
+import XMLParser
+import FlatFileParser
 
 share [mkPersist sqlSettings, mkMigrate "migrateAll"] [persistLowerCase|
 Dept
@@ -35,18 +36,38 @@ Emp
   deptNo Int
   Primary empno
   deriving Show
-Defect
-  nhtsaId Int
-  make String
-  model String
-  year String
-  compname String
-  mfrName String
-  odate String
-  cdate String
-  campno String
-  subject String
-  summary String
+Mortgage
+  hudProjectNumber Int
+  premiseId Text
+  propertyName Text
+  propertyStreet Text
+  propertyCity Text
+  propertyState Text
+  propertyZip Int
+  units Int
+  initialEndorsementDate Text
+  finalEndorsementDate Text
+  originalMortgageAmount Text
+  firstPaymentDate Text
+  maturityDate Text
+  termInMonths Text
+  interestRate Int
+  holderName Double
+  holderCity Text
+  holderState Text
+  servicerName Text
+  servicerCity Text
+  servicerState Text
+  sectionOfActCode Text
+  soaCategory/SubCategory Text
+  term_type Text
+  terminationTypeDescription Int
+  type Text
+  term_date Text
+  te Text
+  tc Text
+  status Text
+  Primary hudProjectNumber
   deriving Show
 |]
 
@@ -64,10 +85,46 @@ empFields = [ ("EMPNO", PersistInt64 . read . unpack)
              , ("COMM", verifyField (PersistDouble . read . unpack) )
              , ("DEPTNO", PersistInt64 . read . unpack)
              ]
+mortgageFields = [PersistInt64 . read . unpack,
+                  PersistText,
+                  PersistText,
+                  PersistText,
+                  PersistText,
+                  PersistText,
+                  PersistInt64 . read . unpack,
+                  PersistInt64 . read . unpack,
+                  PersistText,
+                  PersistText,
+                  PersistText,
+                  PersistText,
+                  PersistText,
+                  PersistText,
+                  PersistInt64 . read . unpack,
+                  PersistDouble . read . unpack,
+                  PersistText,
+                  PersistText,
+                  PersistText,
+                  PersistText,
+                  PersistText,
+                  PersistText,
+                  PersistText,
+                  PersistText,
+                  PersistInt64 . read . unpack,
+                  PersistText,
+                  PersistText,
+                  PersistText,
+                  PersistText,
+                  PersistText,
+                  PersistText]
 
 -- insertRecord :: (Show a, PersistEntity a) => Either Text a -> m a
 insertRecord (Left msg) = liftIO $ print msg
 insertRecord (Right record) = insertEntity record >> return ()
+
+fieldValues :: PersistEntity a => [Text] -> [Text -> PersistValue] -> Either Text a
+fieldValues fieldNames fieldFuncs = fromPersistValues fieldValues
+    where
+      fieldValues = zipWith id fieldFuncs fieldNames
 
 main = do
   (path:args) <- getArgs
