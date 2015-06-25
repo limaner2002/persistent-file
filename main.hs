@@ -18,6 +18,14 @@ import Control.Monad.Logger (runNoLoggingT)
 import XMLParser
 import FlatFileParser
 
+import Data.Conduit
+import qualified Data.Conduit.Binary as CB
+import qualified Data.Conduit.Combinators as CM
+import qualified Data.Text as T
+import Control.Monad.Trans.Resource
+import Control.Monad.IO.Class
+import Text.Read (readEither)
+
 share [mkPersist sqlSettings, mkMigrate "migrateAll"] [persistLowerCase|
 Dept
   deptno Int
@@ -38,35 +46,35 @@ Emp
   deriving Show
 Mortgage
   hudProjectNumber Int
-  premiseId Text
-  propertyName Text
-  propertyStreet Text
-  propertyCity Text
-  propertyState Text
-  propertyZip Int
-  units Int
-  initialEndorsementDate Text
-  finalEndorsementDate Text
-  originalMortgageAmount Text
-  firstPaymentDate Text
-  maturityDate Text
-  termInMonths Text
-  interestRate Int
-  holderName Double
-  holderCity Text
-  holderState Text
-  servicerName Text
-  servicerCity Text
-  servicerState Text
-  sectionOfActCode Text
-  soaCategory/SubCategory Text
-  term_type Text
-  terminationTypeDescription Int
-  type Text
-  term_date Text
-  te Text
-  tc Text
-  status Text
+  premiseId Text Maybe
+  propertyName Text Maybe
+  propertyStreet Text Maybe
+  propertyCity Text Maybe
+  propertyState Text Maybe
+  propertyZip Int Maybe
+  units Int Maybe
+  initialEndorsementDate Text Maybe
+  finalEndorsementDate Text Maybe
+  originalMortgageAmount Text Maybe
+  firstPaymentDate Text Maybe
+  maturityDate Text Maybe
+  termInMonths Text Maybe
+  interestRate Int Maybe
+  holderName Double Maybe
+  holderCity Text Maybe
+  holderState Text Maybe
+  servicerName Text Maybe
+  servicerCity Text Maybe
+  servicerState Text Maybe
+  sectionOfActCode Text Maybe
+  soaCategory/SubCategory Text Maybe
+  term_type Text Maybe
+  terminationTypeDescription Int Maybe
+  type Text Maybe
+  term_date Text Maybe
+  te Text Maybe
+  tc Text Maybe
+  status Text Maybe
   Primary hudProjectNumber
   deriving Show
 |]
@@ -85,7 +93,7 @@ empFields = [ ("EMPNO", PersistInt64 . read . unpack)
              , ("COMM", verifyField (PersistDouble . read . unpack) )
              , ("DEPTNO", PersistInt64 . read . unpack)
              ]
-mortgageFields = [PersistInt64 . read . unpack,
+mortgageFields = [PersistInt64 . readEither,
                   PersistText,
                   PersistText,
                   PersistText,
@@ -126,11 +134,26 @@ fieldValues fieldNames fieldFuncs = fromPersistValues fieldValues
     where
       fieldValues = zipWith id fieldFuncs fieldNames
 
+getRecords :: (MonadResource m) => ConduitM [[T.Text]] [Either Text Mortgage] m ()
+getRecords = CM.map (\lines -> map (\x -> fieldValues x mortgageFields) lines)
+
+consumeRecords :: (MonadResource m, MonadIO m, PersistEntity a, Show a) => Consumer [Either Text a] m ()
+consumeRecords = CM.mapM_ (\records -> mapM_ (liftIO . printRecord) records)
+
+printRecord :: (PersistEntity a, Show a) => Either Text a -> IO ()
+printRecord (Left msg) = print $ unpack msg
+printRecord (Right record) = print record
+
+printLines :: (MonadResource m, MonadIO m) => Consumer [[T.Text]] m ()
+printLines = CM.mapM_ (\lines -> mapM_ (liftIO . print) lines)
+
 main = do
+  -- (path:args) <- getArgs
+  -- records <- parseFile path "EMP" empFields :: IO [Either Text Emp]
+  -- let conn = defaultConnectInfo {connectUser = "josh", connectDatabase = "eIntern"}
+  -- runResourceT $ runNoLoggingT $ withMySQLConn conn $ runSqlConn $ do
+  --        runMigration migrateAll
+  --        mapM_ (\record -> insertRecord record) records
   (path:args) <- getArgs
-  records <- parseFile path "EMP" empFields :: IO [Either Text Emp]
-  let conn = defaultConnectInfo {connectUser = "josh", connectDatabase = "eIntern"}
-  runResourceT $ runNoLoggingT $ withMySQLConn conn $ runSqlConn $ do
-         runMigration migrateAll
-         mapM_ (\record -> insertRecord record) records
-  -- mapM_ printRecord records
+  putStrLn path
+  runResourceT $ CB.sourceFile path $$ parseHeader $= getLines $= getRecords $= consumeRecords

@@ -15,10 +15,6 @@ import Text.XML
 import Text.XML.Cursor
 import Database.Persist
 
-printRecord :: (PersistEntity a, Show a) => Either Text a -> IO ()
-printRecord (Left msg) = print $ unpack msg
-printRecord (Right record) = print record
-
 verifyField :: (Text -> PersistValue) -> Text -> PersistValue
 verifyField f txt
     | length txt > 0 = f txt
