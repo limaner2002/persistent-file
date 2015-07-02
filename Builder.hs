@@ -5,7 +5,10 @@
 {-# LANGUAGE TypeFamilies               #-}
 {-# LANGUAGE MultiParamTypeClasses      #-}
 {-# LANGUAGE OverloadedStrings          #-}
-module Builder where
+module Builder (
+                mkBuilder,
+                build
+               )where
 
 import Language.Haskell.TH
 import Database.Persist.TH
@@ -13,6 +16,7 @@ import Database.Persist
 import Control.Applicative
 import Data.Text (unpack, Text)
 import Text.Read (readEither)
+import Data.Monoid (mconcat)
 
 class Buildable a where
     build :: [String] -> Either String a
@@ -31,11 +35,14 @@ getTypes entity = do
 mkReads :: EntityDef -> [Name] -> Q [Exp]
 mkReads entity names = do
   let tps = getTypes entity
-  sequence $ map (\(tp, name) ->
+  mapM (\(tp, name) ->
                       mkReadEither (unpack tp) name) $ zip tps names
 
-mkBuilder :: EntityDef -> Q [Dec]
-mkBuilder entDef = do
+mkBuilder :: [EntityDef] -> Q [Dec]
+mkBuilder entities = fmap mconcat $ mapM mkBuild entities
+
+mkBuild :: EntityDef -> Q [Dec]
+mkBuild entDef = do
   app1E <- [|(<$>)|]
   applyE <- [|(<*>)|]
   entNameE <- conE entName
@@ -47,7 +54,7 @@ mkBuilder entDef = do
             foldl (\x y -> UInfixE x applyE y) (UInfixE entNameE app1E (exp1)) $ exps
 
   [d| instance Buildable $(conT entName) where
-        build $(pat) = $(fun)|]
+                               build $(pat) = $(fun)|]
   where
     entName = (mkName . unpack . unHaskellName . entityHaskell) entDef
     fields = entityFields entDef

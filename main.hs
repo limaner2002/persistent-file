@@ -95,11 +95,11 @@ empFields = [ ("EMPNO", PersistInt64 . read . unpack)
              , ("DEPTNO", PersistInt64 . read . unpack)
              ]
 
-insertRecord :: (MonadIO m,
-                 Show b, Show a,
-                 PersistStore backend,
-                 backend ~ PersistEntityBackend a,
-                 PersistEntity a) => Either b a -> ReaderT backend m ()
+-- insertRecord :: (MonadIO m,
+--                  Show b, Show a,
+--                  PersistStore backend,
+--                  backend ~ PersistEntityBackend a,
+--                  PersistEntity a) => Either b a -> ReaderT backend m ()
 insertRecord (Left msg) = liftIO $ putStrLn $ "Error: " ++ show msg
 insertRecord (Right record) = do
   key <- insertEntity record
