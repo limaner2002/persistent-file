@@ -24,7 +24,8 @@ import qualified Data.Conduit.Combinators as CM
 import qualified Data.Text as T
 import Control.Monad.Trans.Resource
 import Control.Monad.IO.Class
-import Text.Read (readEither)
+import Control.Monad.Trans.Reader (ReaderT)
+import Text.Read (readMaybe)
 
 share [mkPersist sqlSettings, mkMigrate "migrateAll"] [persistLowerCase|
 Dept
@@ -60,7 +61,7 @@ Mortgage
   maturityDate Text Maybe
   termInMonths Text Maybe
   interestRate Int Maybe
-  holderName Double Maybe
+  holderName Text Maybe
   holderCity Text Maybe
   holderState Text Maybe
   servicerName Text Maybe
@@ -69,7 +70,7 @@ Mortgage
   sectionOfActCode Text Maybe
   soaCategory/SubCategory Text Maybe
   term_type Text Maybe
-  terminationTypeDescription Int Maybe
+  terminationTypeDescription Text Maybe
   type Text Maybe
   term_date Text Maybe
   te Text Maybe
@@ -93,67 +94,65 @@ empFields = [ ("EMPNO", PersistInt64 . read . unpack)
              , ("COMM", verifyField (PersistDouble . read . unpack) )
              , ("DEPTNO", PersistInt64 . read . unpack)
              ]
-mortgageFields = [PersistInt64 . readEither,
-                  PersistText,
-                  PersistText,
-                  PersistText,
-                  PersistText,
-                  PersistText,
-                  PersistInt64 . read . unpack,
-                  PersistInt64 . read . unpack,
-                  PersistText,
-                  PersistText,
-                  PersistText,
-                  PersistText,
-                  PersistText,
-                  PersistText,
-                  PersistInt64 . read . unpack,
-                  PersistDouble . read . unpack,
-                  PersistText,
-                  PersistText,
-                  PersistText,
-                  PersistText,
-                  PersistText,
-                  PersistText,
-                  PersistText,
-                  PersistText,
-                  PersistInt64 . read . unpack,
-                  PersistText,
-                  PersistText,
-                  PersistText,
-                  PersistText,
-                  PersistText,
-                  PersistText]
 
--- insertRecord :: (Show a, PersistEntity a) => Either Text a -> m a
-insertRecord (Left msg) = liftIO $ print msg
-insertRecord (Right record) = insertEntity record >> return ()
+insertRecord :: (MonadIO m,
+                 Show b, Show a,
+                 PersistStore backend,
+                 backend ~ PersistEntityBackend a,
+                 PersistEntity a) => Either b a -> ReaderT backend m ()
+insertRecord (Left msg) = liftIO $ putStrLn $ "Error: " ++ show msg
+insertRecord (Right record) = do
+  key <- insertEntity record
+  liftIO $ putStrLn $ "Inserted record with key " ++ show key
 
 fieldValues :: PersistEntity a => [Text] -> [Text -> PersistValue] -> Either Text a
 fieldValues fieldNames fieldFuncs = fromPersistValues fieldValues
     where
       fieldValues = zipWith id fieldFuncs fieldNames
 
-getRecords :: (MonadResource m) => ConduitM [[T.Text]] [Either Text Mortgage] m ()
-getRecords = CM.map (\lines -> map (\x -> fieldValues x mortgageFields) lines)
+getPersistValue :: PotentialType -> PersistValue
+getPersistValue (MaybeInt str) = case tReadMaybe str :: Maybe Int of
+                                   Just result -> toPersistValue result
+                                   Nothing -> getPersistValue (MaybeDouble str)
+getPersistValue (MaybeDouble str) = case tReadMaybe str :: Maybe Double of
+                                      Just result -> toPersistValue result
+                                      Nothing -> getPersistValue (MaybeString str)
+getPersistValue (MaybeString "") = PersistNull
+getPersistValue (MaybeString str) = toPersistValue str
 
-consumeRecords :: (MonadResource m, MonadIO m, PersistEntity a, Show a) => Consumer [Either Text a] m ()
+getRecord :: PersistEntity a => [Text] -> Either Text a
+getRecord = fromPersistValues . (map (getPersistValue . MaybeInt))
+
+getRecords :: (MonadResource m) => ConduitM [[T.Text]] [Either Text Mortgage] m ()
+getRecords = CM.map (\lines -> map getRecord lines)
+
+-- consumeRecords :: (MonadResource m,
+--                    MonadIO m,
+--                    PersistEntity a
+--                   ) => Consumer [Either Text a] m ()
 consumeRecords = CM.mapM_ (\records -> mapM_ (liftIO . printRecord) records)
+-- consumeRecords = CM.mapM_ (\records -> liftIO $ runResourceT $ runNoLoggingT $ withMySQLConn conn $ runSqlConn $ do
+--                                          runMigration migrateAll
+--                                          -- let f = insertRecord
+--                                          -- _
+--                                          mapM_ insertRecord records
+--                           )
 
 printRecord :: (PersistEntity a, Show a) => Either Text a -> IO ()
-printRecord (Left msg) = print $ unpack msg
+printRecord (Left msg) = putStrLn $ unpack msg
 printRecord (Right record) = print record
 
 printLines :: (MonadResource m, MonadIO m) => Consumer [[T.Text]] m ()
 printLines = CM.mapM_ (\lines -> mapM_ (liftIO . print) lines)
 
+conn = defaultConnectInfo {connectUser = "josh", connectDatabase = "eIntern"}
+
 main = do
   -- (path:args) <- getArgs
-  -- records <- parseFile path "EMP" empFields :: IO [Either Text Emp]
+  -- records <- parseFile path "XROOT/STG_MORTGAGE" mortgageFields :: IO [Either Text Mortgage]
   -- let conn = defaultConnectInfo {connectUser = "josh", connectDatabase = "eIntern"}
   -- runResourceT $ runNoLoggingT $ withMySQLConn conn $ runSqlConn $ do
   --        runMigration migrateAll
   --        mapM_ (\record -> insertRecord record) records
   (path:args) <- getArgs
-  putStrLn path
-  runResourceT $ CB.sourceFile path $$ parseHeader $= getLines $= getRecords $= consumeRecords
+  runResourceT $ CB.sourceFile path $$ getLines $= getRecords $= consumeRecords
