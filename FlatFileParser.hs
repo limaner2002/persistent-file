@@ -59,7 +59,7 @@ parseHeader = CM.take 1
 getLines :: (MonadResource m) => ConduitM C8.ByteString [[T.Text]] m ()
 getLines = CM.map (\chunk -> do
                      let lines = splitLine "\n" $ decodeUtf8 chunk
-                     map (splitLine ",") lines
+                     map (splitLine ";") lines
                   )
 
 getTypes :: (MonadResource m, MonadIO m) => Consumer [[T.Text]] m ()
