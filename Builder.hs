@@ -5,28 +5,28 @@
 {-# LANGUAGE TypeFamilies               #-}
 {-# LANGUAGE MultiParamTypeClasses      #-}
 {-# LANGUAGE OverloadedStrings          #-}
--- module Builder (
---                 mkBuilder,
---                 build,
---                 Buildable
---                )where
-module Builder where
+module Builder (
+                mkBuilder,
+                build,
+                Buildable
+               )where
+-- module Builder where
 
 import Language.Haskell.TH
 import Database.Persist.TH
 import Database.Persist
 import Control.Applicative
-import Data.Text (unpack, pack, Text)
+import qualified Data.Text as T --(unpack, pack, Text, concat)
 import Text.Read (readEither)
 import Data.Monoid (mconcat)
 
 class Buildable a where
-    build :: [Text] -> Either Text a
+    build :: [T.Text] -> Either T.Text a
 
-readEither' :: Read a => Text -> Either Text a
+readEither' :: Read a => T.Text -> Either T.Text a
 readEither' t =
-    case readEither (unpack t) of
-      Left msg -> Left $ pack msg
+    case readEither (T.unpack t) of
+      Left msg -> Left $ T.concat [(T.pack $ msg ++ ": "), t]
       Right d -> Right d
 
 mkReadEither :: String -> [Attr] -> Name -> Q Exp
@@ -35,13 +35,13 @@ mkReadEither tp attrs name
     | otherwise = inspect attrs
     where
       inspectStr attrs
-          | "Maybe" `elem` attrs = [| Right (Just (unpack $(varE name))) |]
-          | otherwise = [| Right (unpack $(varE name))|]
+          | "Maybe" `elem` attrs = [| Right (Just (T.unpack $(varE name))) |]
+          | otherwise = [| Right (T.unpack $(varE name))|]
       inspect attrs
-          | "Maybe" `elem` attrs = [| readEither' $(varE name) :: Either Text (Maybe $(conT (mkName tp))) |]
-          | otherwise = [| readEither' $(varE name) :: Either Text $(conT (mkName tp)) |]
+          | "Maybe" `elem` attrs = [| readEither' $(varE name) :: Either T.Text (Maybe $(conT (mkName tp))) |]
+          | otherwise = [| readEither' $(varE name) :: Either T.Text $(conT (mkName tp)) |]
 
-getTypes :: EntityDef -> [Text]
+getTypes :: EntityDef -> [T.Text]
 getTypes entity = do
   let fields = entityFields entity
   let tpName (FTTypeCon _ tName) = tName
@@ -50,7 +50,7 @@ getTypes entity = do
 mkReads :: EntityDef -> [Name] -> Q [Exp]
 mkReads entity names = do
   mapM (\(tp, attrs, name) ->
-                      mkReadEither (unpack tp) attrs name) $ zip3 types fAttrs names
+                      mkReadEither (T.unpack tp) attrs name) $ zip3 types fAttrs names
   where    
     types = map (tpName . fieldType) fields
     fields = entityFields entity
@@ -74,9 +74,9 @@ mkBuild entDef = do
 
   [d| instance Buildable $(conT entName) where
         build $(pat) = $(fun)
-        build [] = Left (pack "Empty list")
-        build x = Left (pack $ "Failed on:\n" ++ show x)
+        build [] = Left (T.pack "Empty list")
+        build x = Left (T.pack $ "Failed on:\n" ++ show x)
     |]
   where
-    entName = (mkName . unpack . unHaskellName . entityHaskell) entDef
+    entName = (mkName . T.unpack . unHaskellName . entityHaskell) entDef
     fields = entityFields entDef
