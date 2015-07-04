@@ -23,23 +23,32 @@ import Data.Monoid (mconcat)
 class Buildable a where
     build :: [T.Text] -> Either T.Text a
 
-readEither' :: Read a => T.Text -> Either T.Text a
-readEither' t =
+readEither' :: Read a => T.Text -> T.Text -> Either T.Text a
+readEither' t msg =
     case readEither (T.unpack t) of
-      Left msg -> Left $ T.concat [(T.pack $ msg ++ ": "), t]
+      Left _ -> Left $ T.concat ["Error parsing ", msg, ": '", t, "'"]
       Right d -> Right d
 
-mkReadEither :: String -> [Attr] -> Name -> Q Exp
-mkReadEither tp attrs name
+readNullable :: Read a => T.Text -> T.Text -> Either T.Text (Maybe a)
+readNullable t msg
+    | t == T.empty = Right Nothing
+    | otherwise = readEither' t msg >>= return . Just
+
+mkReadEither :: String -> [Attr] -> T.Text -> Name -> Q Exp
+mkReadEither tp attrs fieldName varName
+    | tp == "Text" = inspectTxt attrs
     | tp == "String" = inspectStr attrs
     | otherwise = inspect attrs
     where
+      inspectTxt attrs
+          | "Maybe" `elem` attrs = [| Right (Just $(varE varName)) |]
+          | otherwise = [| Right $(varE varName) |]
       inspectStr attrs
-          | "Maybe" `elem` attrs = [| Right (Just (T.unpack $(varE name))) |]
-          | otherwise = [| Right (T.unpack $(varE name))|]
+          | "Maybe" `elem` attrs = [| Right (Just (T.unpack $(varE varName))) |]
+          | otherwise = [| Right (T.unpack $(varE varName))|]
       inspect attrs
-          | "Maybe" `elem` attrs = [| readEither' $(varE name) :: Either T.Text (Maybe $(conT (mkName tp))) |]
-          | otherwise = [| readEither' $(varE name) :: Either T.Text $(conT (mkName tp)) |]
+          | "Maybe" `elem` attrs = [| readNullable $(varE varName) fieldName :: Either T.Text (Maybe $(conT (mkName tp))) |]
+          | otherwise = [| readEither' $(varE varName) fieldName :: Either T.Text $(conT (mkName tp)) |]
 
 getTypes :: EntityDef -> [T.Text]
 getTypes entity = do
@@ -48,14 +57,15 @@ getTypes entity = do
   map (tpName . fieldType) fields
 
 mkReads :: EntityDef -> [Name] -> Q [Exp]
-mkReads entity names = do
-  mapM (\(tp, attrs, name) ->
-                      mkReadEither (T.unpack tp) attrs name) $ zip3 types fAttrs names
+mkReads entity varNames = do
+  mapM (\(field, varName) ->
+            mkReadEither (fType field) (fAttr field) (fieldName field) varName) $ zip fields varNames
   where    
-    types = map (tpName . fieldType) fields
+    fType = T.unpack . tpName . fieldType
     fields = entityFields entity
     tpName (FTTypeCon _ tName) = tName
-    fAttrs = map fieldAttrs fields
+    fAttr = fieldAttrs
+    fieldName = unHaskellName . fieldHaskell
 
 mkBuilder :: [EntityDef] -> Q [Dec]
 mkBuilder entities = fmap mconcat $ mapM mkBuild entities

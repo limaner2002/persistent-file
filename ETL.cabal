@@ -18,6 +18,9 @@ cabal-version:       >=1.10
 
 executable ETL
   main-is: main.hs
+  ghc-options:
+        -O2
+        -fprof-auto
   -- other-modules:       
   other-extensions:    GADTs, GeneralizedNewtypeDeriving, QuasiQuotes, TemplateHaskell, TypeFamilies, MultiParamTypeClasses, OverloadedStrings
   build-depends:       base >=4.7 && <4.8,

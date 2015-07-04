@@ -29,18 +29,17 @@ mkBuilder qq
 
 -- insertRecord :: (PersistEntity a) => Either Text a -> Int
 insertRecord (Left msg) = do
-  liftIO $ print msg
-  return 1
+  (liftIO . putStrLn . show) msg
 insertRecord (Right record) = do
   key <- insertEntity record
-  return 0
+  return ()
 
 createRecords :: Monad m => Conduit (Row Text) m (Row (Either Text Mortgage))
 createRecords = CM.map (\row -> return $ build row)
 
 --insertRecords :: (MonadResource m, Monad m) => Conduit (Row (Either Text Payment)) m (Row Int)
-insertRecords = CM.mapM (\record ->
-                             mapM insertRecord record
+insertRecords = CM.mapM_ (\record ->
+                             mapM_ insertRecord record
                             -- errors <- mapM insertRecord records
                             -- liftIO $ putStrLn $ "Inserted with " ++ show (sum errors) ++ " errors."
                          )
@@ -54,12 +53,12 @@ reportErrors = accumulate 0
             Nothing -> liftIO $ putStrLn $ "Inserted with " ++ show nError ++ " errors."
             Just err -> accumulate (nError + (sum err))
 
+doIt path = do
+  runMigration migrateAll
+  CB.sourceFile path $= intoCSV (defCSVSettings {csvSep=','}) $= createRecords $$ insertRecords -- $$ reportErrors
+
 main = do
   (path:args) <- getArgs
   let conn = defaultConnectInfo {connectUser = "josh", connectDatabase = "eIntern"}
-  runResourceT $ runNoLoggingT $ withMySQLConn conn $ runSqlConn $
-         CB.sourceFile path $=
-         intoCSV (defCSVSettings {csvSep=','}) $=
-         createRecords $=
-         insertRecords $$
-         reportErrors
+  let f = (runResourceT . runNoLoggingT . (withMySQLConn conn) . runSqlConn)
+  f $ doIt path
