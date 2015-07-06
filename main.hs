@@ -10,10 +10,14 @@ import System.Environment
 import Data.Conduit
 import qualified Data.Conduit.Binary as CB
 import Data.CSV.Conduit
+import qualified Data.Text as T
+-- Until I can figure out how to get the quasi-quoter to not remove
+-- qualifications from types.
 import Data.Text (Text)
 import Control.Monad.Trans.Resource (runResourceT)
 import Builder
 import Model
+import Parseable
 
 import qualified Data.Conduit.Combinators as CM
 import Control.Monad.IO.Class (liftIO)
@@ -23,21 +27,22 @@ import Database.Persist.MySQL
 import Control.Monad.Logger (runNoLoggingT)
 import Control.Monad.IO.Class
 import Control.Monad.Trans.Resource
+import Language.Haskell.TH
 
 share [mkPersist sqlSettings, mkMigrate "migrateAll"] qq
 mkBuilder qq
 
--- insertRecord :: (PersistEntity a) => Either Text a -> Int
+-- insertRecord :: (PersistEntity a) => Either T.Text a -> Int
 insertRecord (Left msg) = do
   (liftIO . putStrLn . show) msg
 insertRecord (Right record) = do
   key <- insertEntity record
   return ()
 
-createRecords :: Monad m => Conduit (Row Text) m (Row (Either Text Mortgage))
+createRecords :: Monad m => Conduit (Row T.Text) m (Row (Either T.Text Payment))
 createRecords = CM.map (\row -> return $ build row)
 
---insertRecords :: (MonadResource m, Monad m) => Conduit (Row (Either Text Payment)) m (Row Int)
+--insertRecords :: (MonadResource m, Monad m) => Conduit (Row (Either T.Text Payment)) m (Row Int)
 insertRecords = CM.mapM_ (\record ->
                              mapM_ insertRecord record
                             -- errors <- mapM insertRecord records
@@ -55,7 +60,7 @@ reportErrors = accumulate 0
 
 doIt path = do
   runMigration migrateAll
-  CB.sourceFile path $= intoCSV (defCSVSettings {csvSep=','}) $= createRecords $$ insertRecords -- $$ reportErrors
+  CB.sourceFile path $= intoCSV (defCSVSettings {csvSep=';'}) $= createRecords $$ insertRecords -- $$ reportErrors
 
 main = do
   (path:args) <- getArgs

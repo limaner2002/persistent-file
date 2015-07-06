@@ -17,38 +17,24 @@ import Database.Persist.TH
 import Database.Persist
 import Control.Applicative
 import qualified Data.Text as T --(unpack, pack, Text, concat)
-import Text.Read (readEither)
+--import Text.Read (readEither)
+import Data.Text.Read
 import Data.Monoid (mconcat)
+import Parseable
 
 class Buildable a where
     build :: [T.Text] -> Either T.Text a
 
-readEither' :: Read a => T.Text -> T.Text -> Either T.Text a
-readEither' t msg =
-    case readEither (T.unpack t) of
-      Left _ -> Left $ T.concat ["Error parsing ", msg, ": '", t, "'"]
-      Right d -> Right d
-
-readNullable :: Read a => T.Text -> T.Text -> Either T.Text (Maybe a)
-readNullable t msg
-    | t == T.empty = Right Nothing
-    | otherwise = readEither' t msg >>= return . Just
-
-mkReadEither :: String -> [Attr] -> T.Text -> Name -> Q Exp
+mkReadEither :: String -> [Attr] -> FieldName -> Name -> Q Exp
 mkReadEither tp attrs fieldName varName
-    | tp == "Text" = inspectTxt attrs
-    | tp == "String" = inspectStr attrs
-    | otherwise = inspect attrs
-    where
-      inspectTxt attrs
-          | "Maybe" `elem` attrs = [| Right (Just $(varE varName)) |]
-          | otherwise = [| Right $(varE varName) |]
-      inspectStr attrs
-          | "Maybe" `elem` attrs = [| Right (Just (T.unpack $(varE varName))) |]
-          | otherwise = [| Right (T.unpack $(varE varName))|]
-      inspect attrs
-          | "Maybe" `elem` attrs = [| readNullable $(varE varName) fieldName :: Either T.Text (Maybe $(conT (mkName tp))) |]
-          | otherwise = [| readEither' $(varE varName) fieldName :: Either T.Text $(conT (mkName tp)) |]
+    | "Maybe" `elem` attrs = [| reportFieldName fieldName tp (tRead $(varE varName) :: Either T.Text (Maybe $(conT (mkName tp)))) |]
+    | otherwise = [| reportFieldName fieldName tp (tRead $(varE varName) :: Either T.Text $(conT (mkName tp))) |]
+
+reportFieldName fieldName tp result =
+    case result of
+      Left msg -> Left $ T.concat [msg, " for field '", fieldName, "'",
+                                   " with type ", tp]
+      Right v -> Right v
 
 getTypes :: EntityDef -> [T.Text]
 getTypes entity = do
@@ -60,7 +46,7 @@ mkReads :: EntityDef -> [Name] -> Q [Exp]
 mkReads entity varNames = do
   mapM (\(field, varName) ->
             mkReadEither (fType field) (fAttr field) (fieldName field) varName) $ zip fields varNames
-  where    
+  where
     fType = T.unpack . tpName . fieldType
     fields = entityFields entity
     tpName (FTTypeCon _ tName) = tName
@@ -70,6 +56,7 @@ mkReads entity varNames = do
 mkBuilder :: [EntityDef] -> Q [Dec]
 mkBuilder entities = fmap mconcat $ mapM mkBuild entities
 
+-- The field reporting should be here
 mkBuild :: EntityDef -> Q [Dec]
 mkBuild entDef = do
   app1E <- [|(<$>)|]
